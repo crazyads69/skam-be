@@ -1,0 +1,65 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "skam-be",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-01-02",
+	"dev": {
+		"local_protocol": "http",
+		"port": 8080
+	},
+	"d1_databases": [
+		{
+			"binding": "skam_db_dev",
+			"database_name": "skam-db-dev",
+			"database_id": "5557ffb2-732f-4657-9972-3bc616488411",
+			"remote": true,
+			"migrations_dir": "drizzle"
+		}
+	],
+	"r2_buckets": [
+		{
+			"bucket_name": "skam",
+			"binding": "skam",
+			"remote": true
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "SKAM_RATE_LIMIT",
+			"id": "57177a0689584050b1ef1ef0b77a72ae",
+			"remote": true
+		}
+	]
+	// "compatibility_flags": [
+	//   "nodejs_compat"
+	// ],
+	// "vars": {
+	//   "MY_VAR": "my-variable"
+	// },
+	// "kv_namespaces": [
+	//   {
+	//     "binding": "MY_KV_NAMESPACE",
+	//     "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	//   }
+	// ],
+	// "r2_buckets": [
+	//   {
+	//     "binding": "MY_BUCKET",
+	//     "bucket_name": "my-bucket"
+	//   }
+	// ],
+	// "d1_databases": [
+	//   {
+	//     "binding": "MY_DB",
+	//     "database_name": "my-database",
+	//     "database_id": ""
+	//   }
+	// ],
+	// "ai": {
+	//   "binding": "AI"
+	// },
+	// "observability": {
+	//   "enabled": true,
+	//   "head_sampling_rate": 1
+	// }
+}
