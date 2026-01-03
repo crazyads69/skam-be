@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import bankRouter from "./route/bank.route";
 
-const app = new Hono<{ Bindings: Env }>().basePath("/api/v1");
+const app = new Hono<{ Bindings: CloudflareBindings }>().basePath("/api/v1");
 
 app.use(
 	"*",
