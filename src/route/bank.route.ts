@@ -2,11 +2,11 @@ import { Hono } from "hono";
 import { BankService } from "../service/bank.service";
 import { errorResponse, successResponse } from "../interface/response";
 
-const bankRouter = new Hono<{ Bindings: Env }>();
+const bankRouter = new Hono<{ Bindings: CloudflareBindings }>();
 
 bankRouter.get("/", async (c) => {
 	try {
-		const bankService = new BankService(c.env.SKAM_RATE_LIMIT);
+		const bankService = new BankService(c.env.SKAM_CACHE);
 		const banks = await bankService.getBanks();
 
 		return successResponse(c, banks, "Banks fetched successfully");
