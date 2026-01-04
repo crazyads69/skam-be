@@ -12,6 +12,7 @@
 		"ci": "biome ci ."
 	},
 	"dependencies": {
+		"@hono-rate-limiter/cloudflare": "^0.2.2",
 		"dotenv": "^17.2.3",
 		"drizzle-orm": "^0.45.1",
 		"hono": "^4.11.3",

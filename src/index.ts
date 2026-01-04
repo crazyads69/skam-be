@@ -1,29 +1,71 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { poweredBy } from "hono/powered-by";
 import { rateLimiter } from "hono-rate-limiter";
 import bankRouter from "./route/bank.route";
+import { generateRateLimitKey } from "./utils/utils";
 
 const app = new Hono<{ Bindings: CloudflareBindings }>().basePath("/api/v1");
 
 app.use(
 	"*",
 	cors({
-		origin: "*", // TODO: restrict in production
-		allowMethods: ["GET", "POST", "OPTIONS"],
-		allowHeaders: ["Content-Type", "Authorization"],
+		origin: "*",
+		allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+		allowHeaders: ["Content-Type", "Authorization", "X-Fingerprint"],
+		exposeHeaders: [
+			"X-RateLimit-Limit",
+			"X-RateLimit-Remaining",
+			"X-RateLimit-Reset",
+			"Retry-After",
+		],
 		maxAge: 86400,
+	})
+);
+
+app.use(
+	poweredBy({
+		serverName: "Cloudflare Workers",
 	})
 );
 
 app.use("*", logger());
 
-app.use(
-	rateLimiter<{ Bindings: CloudflareBindings }>({
-		binding: (c) => c.env.SKAM_RATE_LIMIT,
-		keyGenerator: (c) => c.req.header("cf-connecting-ip") ?? "",
-	})
-);
+app.use("*", async (c, next) => {
+	const _path = c.req.path;
+
+	if (_path === "/api/v1/health") {
+		return next();
+	}
+
+	if (_path.startsWith("/api/v1/upload")) {
+		return rateLimiter<{ Bindings: CloudflareBindings }>({
+			binding: c.env.SKAM_RATE_LIMIT_UPLOAD,
+			keyGenerator: (c) => generateRateLimitKey(c),
+		})(c, next);
+	}
+
+	if (_path.startsWith("/api/v1/cases")) {
+		return rateLimiter<{ Bindings: CloudflareBindings }>({
+			binding: c.env.SKAM_RATE_LIMIT_SUBMIT,
+			keyGenerator: (c) => generateRateLimitKey(c),
+		})(c, next);
+	}
+
+	if (_path.startsWith("/api/v1/search")) {
+		return rateLimiter<{ Bindings: CloudflareBindings }>({
+			binding: c.env.SKAM_RATE_LIMIT_SEARCH,
+			keyGenerator: (c) => generateRateLimitKey(c),
+		})(c, next);
+	}
+
+	// Fallback to rate limiting default
+	return rateLimiter<{ Bindings: CloudflareBindings }>({
+		binding: c.env.SKAM_RATE_LIMIT,
+		keyGenerator: (c) => generateRateLimitKey(c),
+	})(c, next);
+});
 
 app.get("/health", (c) => {
 	return c.json({
@@ -34,5 +76,12 @@ app.get("/health", (c) => {
 });
 
 app.route("/banks", bankRouter);
+// app.route("/upload", uploadRouter);
+// app.route("/cases", caseRouter);
+// app.route("/search", searchRouter);
+
+app.notFound((c) => {
+	return c.json({ success: false, error: "Not found" }, 404);
+});
 
 export default app;
