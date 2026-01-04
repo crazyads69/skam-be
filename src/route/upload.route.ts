@@ -9,7 +9,6 @@ uploadRouter.post(
 	"/",
 	turnstileVerify({
 		secretKey: (c) => c.env.TURNSTILE_SECRET_KEY,
-		expectedAction: "upload",
 	}),
 	async (c) => {
 		try {

@@ -2,8 +2,8 @@ import type { Context, MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
 import { errorResponse } from "../interface/response";
 import {
-	TurnstileResponseSchema,
 	type TurnstileResponse,
+	TurnstileResponseSchema,
 } from "../interface/turnstile";
 
 interface TurnstileOptions {

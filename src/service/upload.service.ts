@@ -9,8 +9,12 @@ export class UploadService {
 	}
 
 	private async generateFileHash(buffer: ArrayBuffer): Promise<string> {
-		const { sha256 } = await import("hash-wasm");
-		return await sha256(new Uint8Array(buffer));
+		const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+		const hashArray = Array.from(new Uint8Array(hashBuffer));
+		const hashHex = hashArray
+			.map((b) => b.toString(16).padStart(2, "0"))
+			.join("");
+		return hashHex;
 	}
 
 	private async checkIfFileExists(hash: string): Promise<string | null> {

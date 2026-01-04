@@ -63,7 +63,8 @@
 			"id": "352a99711aa34ae4a99566501293daca",
 			"remote": true
 		}
-	]
+	],
+	"compatibility_flags": ["nodejs_compat"]
 	// "compatibility_flags": [
 	//   "nodejs_compat"
 	// ],
