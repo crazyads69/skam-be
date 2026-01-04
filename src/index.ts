@@ -4,6 +4,7 @@ import { logger } from "hono/logger";
 import { poweredBy } from "hono/powered-by";
 import { rateLimiter } from "hono-rate-limiter";
 import bankRouter from "./route/bank.route";
+import uploadRouter from "./route/upload.route";
 import { generateRateLimitKey } from "./utils/utils";
 
 const app = new Hono<{ Bindings: CloudflareBindings }>().basePath("/api/v1");
@@ -76,7 +77,7 @@ app.get("/health", (c) => {
 });
 
 app.route("/banks", bankRouter);
-// app.route("/upload", uploadRouter);
+app.route("/upload", uploadRouter);
 // app.route("/cases", caseRouter);
 // app.route("/search", searchRouter);
 
