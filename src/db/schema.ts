@@ -1,15 +1,13 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const scamCasesTable = sqliteTable(
 	"scam_cases",
 	{
 		id: integer("id").primaryKey({ autoIncrement: true }),
 
-		// Case Title
-		title: text("title").notNull(),
-
 		// Scammer Info
 		scammerName: text("scammer_name").notNull(),
+		bankAccountName: text("bank_account_name").notNull(),
 		bankCode: text("bank_code").notNull(),
 		bankName: text("bank_name").notNull(),
 		accountNumber: text("account_number").notNull(),
@@ -23,7 +21,6 @@ export const scamCasesTable = sqliteTable(
 			EvidenceFile[]
 		>(),
 
-		submitterIpHash: text("submitter_ip_hash").notNull(),
 		submittedAt: integer("submitted_at", {
 			mode: "timestamp_ms",
 		}).notNull(),
@@ -46,6 +43,7 @@ export const scamCasesTable = sqliteTable(
 		index("idx_status").on(table.status),
 		index("idx_account_number").on(table.accountNumber),
 		index("idx_scammer_name_lower").on(table.scammerName),
+		index("idx_bank_account_name_lower").on(table.bankAccountName),
 		index("idx_submitted_at").on(table.submittedAt),
 		index("idx_status_submitted").on(table.status, table.submittedAt),
 	]
