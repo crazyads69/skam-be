@@ -15,6 +15,27 @@
       "when": 1767511727157,
       "tag": "0001_silly_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1767516555919,
+      "tag": "0002_chubby_firebird",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1767606456556,
+      "tag": "0003_lush_jocasta",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1767608609097,
+      "tag": "0004_loud_odin",
+      "breakpoints": true
     }
   ]
 }

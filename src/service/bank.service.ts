@@ -1,5 +1,11 @@
 import z from "zod";
-import { BankSchema, BankResponseSchema, type Bank } from "../interface/bank";
+import {
+	type Bank,
+	BankResponseSchema,
+	type BankServiceClearCacheResult,
+	type BankServiceGetBanksResult,
+	type BankServiceRefreshCacheResult,
+} from "../interface/bank";
 
 const VIETQR_API_URL = "https://api.vietqr.io/v2/banks";
 const CACHE_KEY = "bank:";
@@ -8,7 +14,7 @@ const CACHE_TTL = 86400; // 1 day
 export class BankService {
 	constructor(private kv: KVNamespace) {}
 
-	async getBanks(): Promise<Bank[]> {
+	async getBanks(): Promise<BankServiceGetBanksResult> {
 		const cached = await this.kv.get<Bank[]>(CACHE_KEY, "json");
 
 		if (cached) {
@@ -29,7 +35,7 @@ export class BankService {
 		return banks;
 	}
 
-	async refreshCache(): Promise<Bank[]> {
+	async refreshCache(): Promise<BankServiceRefreshCacheResult> {
 		console.log("🔄 Force refreshing banks cache...");
 
 		const banks = await this.fetchBanksFromAPI();
@@ -43,7 +49,7 @@ export class BankService {
 		return banks;
 	}
 
-	async clearCache(): Promise<void> {
+	async clearCache(): Promise<BankServiceClearCacheResult> {
 		await this.kv.delete(CACHE_KEY);
 		console.log("🗑️ Banks cache cleared");
 	}

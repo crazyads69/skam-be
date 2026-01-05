@@ -1,0 +1,1 @@
+ALTER TABLE `scammer_stats` DROP COLUMN `average_amount_lost`;

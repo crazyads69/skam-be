@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { errorResponse, successResponse } from "../interface/response";
+import { FilesSchema } from "../interface/upload";
 import { turnstileVerify } from "../middleware/turnstile.middleware";
 import { UploadService } from "../service/upload.service";
 
@@ -26,7 +27,17 @@ uploadRouter.post(
 				}
 			}
 
-			const result = await uploadService.uploadFiles(files);
+			const validation = FilesSchema.safeParse(files);
+
+			if (!validation.success) {
+				const errors = validation.error.issues.map((err) => ({
+					field: err.path.join("."),
+					message: err.message,
+				}));
+				return errorResponse(c, "File validation failed", 400, errors);
+			}
+
+			const result = await uploadService.uploadFiles(validation.data);
 
 			if (result.uploaded.length === 0 && result.errors.length > 0) {
 				return errorResponse(

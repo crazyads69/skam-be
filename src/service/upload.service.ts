@@ -1,4 +1,8 @@
-import { FileSchema, type UploadedFile } from "../interface/upload";
+import type {
+	UploadedFile,
+	UploadServiceUploadFileResult,
+	UploadServiceUploadFilesResult,
+} from "../interface/upload";
 import { getFileExtension } from "../utils/utils";
 
 export class UploadService {
@@ -44,30 +48,7 @@ export class UploadService {
 		return null;
 	}
 
-	private validateFile(file: File): { valid: boolean; error?: string } {
-		const result = FileSchema.safeParse(file);
-
-		if (!result.success) {
-			return {
-				valid: false,
-				error: result.error.issues.map((i) => i.message).join("; "),
-			};
-		}
-
-		return { valid: true };
-	}
-
-	async uploadFile(file: File): Promise<{
-		success: boolean;
-		file?: UploadedFile;
-		error?: string;
-	}> {
-		const validation = this.validateFile(file);
-
-		if (!validation.valid) {
-			return { success: false, error: validation.error };
-		}
-
+	async uploadFile(file: File): Promise<UploadServiceUploadFileResult> {
 		try {
 			const buffer = await file.arrayBuffer();
 			const hash = await this.generateFileHash(buffer);
@@ -138,10 +119,7 @@ export class UploadService {
 		}
 	}
 
-	async uploadFiles(files: File[]): Promise<{
-		uploaded: UploadedFile[];
-		errors: Array<{ name: string; error: string }>;
-	}> {
+	async uploadFiles(files: File[]): Promise<UploadServiceUploadFilesResult> {
 		const uploaded: UploadedFile[] = [];
 		const errors: Array<{ name: string; error: string }> = [];
 

@@ -4,6 +4,7 @@ import { logger } from "hono/logger";
 import { poweredBy } from "hono/powered-by";
 import { rateLimiter } from "hono-rate-limiter";
 import bankRouter from "./route/bank.route";
+import caseRouter from "./route/case.route";
 import uploadRouter from "./route/upload.route";
 import { generateRateLimitKey } from "./utils/utils";
 
@@ -78,8 +79,7 @@ app.get("/health", (c) => {
 
 app.route("/banks", bankRouter);
 app.route("/upload", uploadRouter);
-// app.route("/cases", caseRouter);
-// app.route("/search", searchRouter);
+app.route("/cases", caseRouter);
 
 app.notFound((c) => {
 	return c.json({ success: false, error: "Not found" }, 404);
