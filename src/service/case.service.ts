@@ -19,11 +19,70 @@ import type {
 export class CaseService {
 	private db: DrizzleD1Database;
 	private kv: KVNamespace;
-	private CACHE_TTL = 3600;
+	private readonly CACHE_TTL = 3600;
+	private readonly COUNT_CACHE_TTL = 600;
+
+	// Cache key prefixes
+	private readonly CACHE_PREFIX = {
+		CASE: "case:",
+		CASES: "cases:",
+		COUNT: "count:approved",
+		STATS_SEARCH: "stats-search::",
+	} as const;
 
 	constructor(d1: D1Database, kv: KVNamespace) {
 		this.db = drizzle(d1);
 		this.kv = kv;
+	}
+
+	// Cache key generators
+	private getCaseKey(id: number): string {
+		return `${this.CACHE_PREFIX.CASE}${id}`;
+	}
+
+	private getCasesByAccountKey(
+		accountIdentifier: string,
+		bankCode: string,
+		limit: number,
+		offset: number
+	): string {
+		return `${this.CACHE_PREFIX.CASES}${accountIdentifier}:${bankCode}:${limit}:${offset}`;
+	}
+
+	private getStatsCacheKey(params: {
+		input?: string;
+		bankCode?: string;
+	}): string {
+		const { input, bankCode } = params;
+		const parts = [
+			this.CACHE_PREFIX.STATS_SEARCH.slice(0, -2), // Remove trailing ::
+			input ? `input:${input.toLowerCase().trim()}` : "",
+			bankCode ? `bank:${bankCode.trim()}` : "",
+		].filter(Boolean);
+		return parts.join("::");
+	}
+
+	// Cache helpers
+	private async getCached<T>(key: string): Promise<T | null> {
+		return await this.kv.get<T>(key, "json");
+	}
+
+	private async setCached<T>(
+		key: string,
+		value: T,
+		ttl: number = this.CACHE_TTL
+	): Promise<void> {
+		await this.kv.put(key, JSON.stringify(value), {
+			expirationTtl: ttl,
+		});
+	}
+
+	private async invalidateCacheByPrefix(prefix: string): Promise<void> {
+		const listResult = await this.kv.list({ prefix });
+		const deletePromises = listResult.keys.map((key) =>
+			this.kv.delete(key.name)
+		);
+		await Promise.all(deletePromises);
 	}
 
 	async submitCase(
@@ -55,15 +114,15 @@ export class CaseService {
 	}
 
 	async getCaseById(id: number): Promise<CaseServiceGetCaseByIdResult> {
-		const cacheKey = `case:${id}`;
+		const cacheKey = this.getCaseKey(id);
+		const cached = await this.getCached<SelectScamCase>(cacheKey);
 
-		const cached = await this.kv.get<SelectScamCase>(cacheKey, "json");
 		if (cached) {
-			console.log(`✅ Cache HIT: Case #${id}`);
+			console.log(`✅ Cache HIT: Case #${id} [${cacheKey}]`);
 			return cached;
 		}
 
-		console.log(`❌ Cache MISS: Case #${id}`);
+		console.log(`❌ Cache MISS: Case #${id} [${cacheKey}]`);
 
 		const [result] = await this.db
 			.select()
@@ -76,13 +135,9 @@ export class CaseService {
 			)
 			.limit(1);
 
-		if (result) {
-			if (result.status === "approved") {
-				await this.kv.put(cacheKey, JSON.stringify(result), {
-					expirationTtl: this.CACHE_TTL,
-				});
-				console.log(`✅ Cached case #${id}`);
-			}
+		if (result?.status === "approved") {
+			await this.setCached(cacheKey, result);
+			console.log(`✅ Cached case #${id}`);
 		}
 
 		return result || null;
@@ -94,18 +149,23 @@ export class CaseService {
 		limit = 50,
 		offset = 0
 	): Promise<CaseServiceGetCasesByAccountIdentifierResult> {
-		const cacheKey = `cases:${accountIdentifier}:${bankCode}:${limit}:${offset}`;
+		const cacheKey = this.getCasesByAccountKey(
+			accountIdentifier,
+			bankCode,
+			limit,
+			offset
+		);
+		const cached = await this.getCached<SelectScamCase[]>(cacheKey);
 
-		const cached = await this.kv.get<SelectScamCase[]>(cacheKey, "json");
 		if (cached) {
 			console.log(
-				`✅ Cache HIT: Cases for ${accountIdentifier} - ${bankCode} (limit: ${limit}, offset: ${offset})`
+				`✅ Cache HIT: Cases for ${accountIdentifier} - ${bankCode} (limit: ${limit}, offset: ${offset}) [${cacheKey}]`
 			);
 			return cached;
 		}
 
 		console.log(
-			`❌ Cache MISS: Cases for ${accountIdentifier} - ${bankCode} (limit: ${limit}, offset: ${offset})`
+			`❌ Cache MISS: Cases for ${accountIdentifier} - ${bankCode} (limit: ${limit}, offset: ${offset}) [${cacheKey}]`
 		);
 
 		const results = await this.db
@@ -122,32 +182,28 @@ export class CaseService {
 			.limit(limit)
 			.offset(offset);
 
-		await this.kv.put(cacheKey, JSON.stringify(results), {
-			expirationTtl: this.CACHE_TTL,
-		});
-
+		await this.setCached(cacheKey, results);
 		console.log(
-			`✅ Cached ${results.length} cases for ${accountIdentifier} - ${bankCode} (limit: ${limit}, offset: ${offset})`
+			`✅ Cached ${results.length} cases for ${accountIdentifier} - ${bankCode}`
 		);
 
 		return results;
 	}
 
 	async countCases(): Promise<CaseServiceCountCasesResult> {
-		const cacheKey = "count:approved";
-
-		const cached = await this.kv.get<{ total: number; approved: number }>(
-			cacheKey,
-			"json"
+		const cacheKey = this.CACHE_PREFIX.COUNT;
+		const cached = await this.getCached<CaseServiceCountCasesResult>(
+			cacheKey
 		);
-		if (cached !== null) {
+
+		if (cached) {
 			console.log(
-				`✅ Cache HIT: Case counts - total: ${cached.total}, approved: ${cached.approved}`
+				`✅ Cache HIT: Case counts - total: ${cached.total}, approved: ${cached.approved} [${cacheKey}]`
 			);
 			return cached;
 		}
 
-		console.log("❌ Cache MISS: Case counts");
+		console.log(`❌ Cache MISS: Case counts [${cacheKey}]`);
 
 		const [totalResult, approvedResult] = await Promise.all([
 			this.db
@@ -159,18 +215,16 @@ export class CaseService {
 				.where(eq(scamCasesTable.status, "approved")),
 		]);
 
-		const counts = {
+		const counts: CaseServiceCountCasesResult = {
 			total: totalResult[0].count,
 			approved: approvedResult[0].count,
 		};
 
-		await this.kv.put(cacheKey, JSON.stringify(counts), {
-			expirationTtl: 600,
-		});
-
+		await this.setCached(cacheKey, counts, this.COUNT_CACHE_TTL);
 		console.log(
 			`✅ Cached case counts - total: ${counts.total}, approved: ${counts.approved}`
 		);
+
 		return counts;
 	}
 
@@ -211,8 +265,8 @@ export class CaseService {
 
 		console.log(`✅ Case #${id} updated to status: ${status}`);
 
-		await this.kv.delete(`case:${id}`);
-
+		// Invalidate relevant caches
+		await this.kv.delete(this.getCaseKey(id));
 		await this.invalidateStatsCache(
 			caseToUpdate.accountIdentifier,
 			caseToUpdate.bankCode
@@ -292,27 +346,17 @@ export class CaseService {
 		accountIdentifier: string,
 		bankCode: string
 	): Promise<void> {
-		const statsKey = `stats:${accountIdentifier}:${bankCode}`;
-		await this.kv.delete(statsKey);
+		// Delete stats cache
+		await this.kv.delete(`stats:${accountIdentifier}:${bankCode}`);
 
 		// Clear all paginated cache entries for this account
-		const casesCachePrefix = `cases:${accountIdentifier}:${bankCode}:`;
-		const listResult = await this.kv.list({ prefix: casesCachePrefix });
-		const deletePromises = listResult.keys.map((key) =>
-			this.kv.delete(key.name)
-		);
-		await Promise.all(deletePromises);
+		const casesCachePrefix = `${this.CACHE_PREFIX.CASES}${accountIdentifier}:${bankCode}:`;
+		await this.invalidateCacheByPrefix(casesCachePrefix);
 
-		// Also invalidate stats search cache
-		const statsSearchResult = await this.kv.list({
-			prefix: "stats-search::",
-		});
-		const statsDeletePromises = statsSearchResult.keys.map((key) =>
-			this.kv.delete(key.name)
-		);
-		await Promise.all(statsDeletePromises);
+		// Clear stats search cache
+		await this.invalidateCacheByPrefix(this.CACHE_PREFIX.STATS_SEARCH);
 
-		console.log(`🗑️ Invalidated stats cache for ${accountIdentifier}`);
+		console.log(`🗑️ Invalidated caches for ${accountIdentifier}`);
 	}
 
 	async searchScammerStats(params: {
@@ -320,55 +364,39 @@ export class CaseService {
 		bankCode: string;
 	}): Promise<CaseServiceSearchScammerStatsResult | null> {
 		const { input, bankCode } = params;
+		const cacheKey = this.getStatsCacheKey({ input, bankCode });
 
-		const cacheKey = this.generateStatsCacheKey({
-			input,
-			bankCode,
-		});
+		const cached =
+			await this.getCached<CaseServiceSearchScammerStatsResult>(cacheKey);
 
-		const cached = await this.kv.get<
-			(SelectScammerStats & { recentCases: SelectScamCase[] }) | null
-		>(cacheKey, "json");
-
-		if (cached) {
+		if (cached !== null) {
 			console.log(`✅ Cache HIT: Stats Search [${cacheKey}]`);
 			return cached;
 		}
 
 		console.log(`❌ Cache MISS: Stats Search [${cacheKey}]`);
 
-		const conditions = [];
+		const searchTerm = `%${input.trim().toLowerCase()}%`;
+		const searchCondition = or(
+			like(scammerStatsTable.scammerName, searchTerm),
+			like(scammerStatsTable.bankAccountName, searchTerm),
+			like(scammerStatsTable.accountIdentifier, searchTerm)
+		);
 
-		if (input?.trim()) {
-			const searchTerm = `%${input.trim().toLowerCase()}%`;
-			const searchCondition = or(
-				like(scammerStatsTable.scammerName, searchTerm),
-				like(scammerStatsTable.bankAccountName, searchTerm),
-				like(scammerStatsTable.accountIdentifier, searchTerm)
-			);
-			if (searchCondition) {
-				conditions.push(searchCondition);
-			}
-		}
-
-		if (bankCode?.trim()) {
-			conditions.push(eq(scammerStatsTable.bankCode, bankCode.trim()));
-		}
-
-		const whereClause =
-			conditions.length > 0 ? and(...conditions) : undefined;
+		const conditions = [
+			searchCondition,
+			eq(scammerStatsTable.bankCode, bankCode.trim()),
+		].filter(Boolean);
 
 		const [statsResult] = await this.db
 			.select()
 			.from(scammerStatsTable)
-			.where(whereClause)
+			.where(and(...conditions))
 			.orderBy(desc(scammerStatsTable.lastReportedAt))
 			.limit(1);
 
 		if (!statsResult) {
-			await this.kv.put(cacheKey, JSON.stringify(null), {
-				expirationTtl: this.CACHE_TTL,
-			});
+			await this.setCached(cacheKey, null);
 			console.log("✅ No stats found, cached null result");
 			return null;
 		}
@@ -390,31 +418,14 @@ export class CaseService {
 			.orderBy(desc(scamCasesTable.submittedAt))
 			.limit(5);
 
-		const result = {
+		const result: CaseServiceSearchScammerStatsResult = {
 			...statsResult,
 			recentCases,
 		};
 
-		await this.kv.put(cacheKey, JSON.stringify(result), {
-			expirationTtl: this.CACHE_TTL,
-		});
-
+		await this.setCached(cacheKey, result);
 		console.log("✅ Cached stats search result with recent cases");
 
 		return result;
-	}
-
-	private generateStatsCacheKey(params: {
-		input?: string;
-		bankCode?: string;
-	}): string {
-		const { input, bankCode } = params;
-		const parts = [
-			"stats-search",
-			input ? `input:${input.toLowerCase().trim()}` : "",
-			bankCode ? `bank:${bankCode.trim()}` : "",
-		].filter(Boolean);
-
-		return parts.join("::");
 	}
 }

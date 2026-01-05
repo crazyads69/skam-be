@@ -7,15 +7,32 @@ import {
 	type BankServiceRefreshCacheResult,
 } from "../interface/bank";
 
-const VIETQR_API_URL = "https://api.vietqr.io/v2/banks";
-const CACHE_KEY = "bank:";
-const CACHE_TTL = 86400; // 1 day
-
 export class BankService {
+	private readonly VIETQR_API_URL = "https://api.vietqr.io/v2/banks";
+	private readonly CACHE_KEY = "bank:";
+	private readonly CACHE_TTL = 86400; // 1 day
+	private readonly USER_AGENT =
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
+
 	constructor(private kv: KVNamespace) {}
 
+	// Cache helpers
+	private async getCached<T>(key: string): Promise<T | null> {
+		return await this.kv.get<T>(key, "json");
+	}
+
+	private async setCached<T>(
+		key: string,
+		value: T,
+		ttl: number = this.CACHE_TTL
+	): Promise<void> {
+		await this.kv.put(key, JSON.stringify(value), {
+			expirationTtl: ttl,
+		});
+	}
+
 	async getBanks(): Promise<BankServiceGetBanksResult> {
-		const cached = await this.kv.get<Bank[]>(CACHE_KEY, "json");
+		const cached = await this.getCached<Bank[]>(this.CACHE_KEY);
 
 		if (cached) {
 			console.log("✅ Cache HIT: Banks loaded from KV");
@@ -25,11 +42,7 @@ export class BankService {
 		console.log("❌ Cache MISS: Fetching from VietQR API");
 
 		const banks = await this.fetchBanksFromAPI();
-
-		await this.kv.put(CACHE_KEY, JSON.stringify(banks), {
-			expirationTtl: CACHE_TTL,
-		});
-
+		await this.setCached(this.CACHE_KEY, banks);
 		console.log(`✅ Cached ${banks.length} banks in KV`);
 
 		return banks;
@@ -39,27 +52,22 @@ export class BankService {
 		console.log("🔄 Force refreshing banks cache...");
 
 		const banks = await this.fetchBanksFromAPI();
-
-		await this.kv.put(CACHE_KEY, JSON.stringify(banks), {
-			expirationTtl: CACHE_TTL,
-		});
-
+		await this.setCached(this.CACHE_KEY, banks);
 		console.log(`✅ Cache refreshed with ${banks.length} banks`);
 
 		return banks;
 	}
 
 	async clearCache(): Promise<BankServiceClearCacheResult> {
-		await this.kv.delete(CACHE_KEY);
+		await this.kv.delete(this.CACHE_KEY);
 		console.log("🗑️ Banks cache cleared");
 	}
 
 	private async fetchBanksFromAPI(): Promise<Bank[]> {
 		try {
-			const response = await fetch(VIETQR_API_URL, {
+			const response = await fetch(this.VIETQR_API_URL, {
 				headers: {
-					"User-Agent":
-						"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+					"User-Agent": this.USER_AGENT,
 				},
 			});
 
@@ -68,7 +76,6 @@ export class BankService {
 			}
 
 			const rawData = await response.json();
-
 			const data = BankResponseSchema.parse(rawData);
 
 			if (data.code !== "00") {

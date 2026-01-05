@@ -6,23 +6,54 @@ import type {
 import { getFileExtension } from "../utils/utils";
 
 export class UploadService {
+	private readonly CACHE_TTL = 86400 * 30; // 30 days
+	private readonly CACHE_PREFIX = "file:";
+	private readonly R2_PREFIX = "file/";
+
 	constructor(private r2: R2Bucket, private kv: KVNamespace) {}
 
-	private cacheKey(hash: string): string {
-		return `file:${hash}`;
+	// Cache key generator
+	private getCacheKey(hash: string): string {
+		return `${this.CACHE_PREFIX}${hash}`;
 	}
 
+	// Generate R2 key for new uploads
+	private generateR2Key(
+		hash: string,
+		timestamp: number,
+		extension: string
+	): string {
+		return `${this.R2_PREFIX}${hash}_${timestamp}${extension}`;
+	}
+
+	// Generate SHA-256 hash from file buffer
 	private async generateFileHash(buffer: ArrayBuffer): Promise<string> {
 		const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
 		const hashArray = Array.from(new Uint8Array(hashBuffer));
-		const hashHex = hashArray
-			.map((b) => b.toString(16).padStart(2, "0"))
-			.join("");
-		return hashHex;
+		return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 	}
 
+	// Create UploadedFile object
+	private createUploadedFile(
+		file: File,
+		r2Key: string,
+		hash: string
+	): UploadedFile {
+		return {
+			key: r2Key,
+			name: file.name,
+			size: file.size,
+			contentType: file.type,
+			hash,
+			uploadedAt: file.lastModified
+				? new Date(file.lastModified).toISOString()
+				: new Date().toISOString(),
+		};
+	}
+
+	// Check if file already exists in cache or R2
 	private async checkIfFileExists(hash: string): Promise<string | null> {
-		const cacheKey = this.cacheKey(hash);
+		const cacheKey = this.getCacheKey(hash);
 		const existingUrl = await this.kv.get<string>(cacheKey);
 
 		if (existingUrl) {
@@ -32,14 +63,16 @@ export class UploadService {
 			return existingUrl;
 		}
 
-		const listed = await this.r2.list({ prefix: `file/${hash}` });
+		const listed = await this.r2.list({
+			prefix: `${this.R2_PREFIX}${hash}`,
+		});
 
 		if (listed.objects.length > 0) {
 			const existingKey = listed.objects[0].key;
 			console.log(`✅ Duplicate found in R2: ${hash}`);
 
 			await this.kv.put(cacheKey, existingKey, {
-				expirationTtl: 86400 * 30,
+				expirationTtl: this.CACHE_TTL,
 			});
 
 			return existingKey;
@@ -48,65 +81,62 @@ export class UploadService {
 		return null;
 	}
 
+	// Upload file to R2 and cache the key
+	private async uploadToR2(
+		buffer: ArrayBuffer,
+		file: File,
+		hash: string
+	): Promise<string> {
+		const extension = getFileExtension(file.type);
+		const timestamp = Date.now();
+		const r2Key = this.generateR2Key(hash, timestamp, extension);
+
+		await this.r2.put(r2Key, buffer, {
+			httpMetadata: {
+				contentType: file.type,
+			},
+			customMetadata: {
+				originalName: file.name,
+				hash,
+				uploadedAt: new Date().toISOString(),
+			},
+		});
+
+		await this.kv.put(this.getCacheKey(hash), r2Key, {
+			expirationTtl: this.CACHE_TTL,
+		});
+
+		return r2Key;
+	}
+
 	async uploadFile(file: File): Promise<UploadServiceUploadFileResult> {
 		try {
 			const buffer = await file.arrayBuffer();
 			const hash = await this.generateFileHash(buffer);
+
+			const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+			const shortHash = hash.substring(0, 16);
 			console.log(
-				`📝 File: ${file.name} (${(file.size / 1024 / 1024).toFixed(
-					2
-				)}MB) | Hash: ${hash.substring(0, 16)}...`
+				`📝 File: ${file.name} (${sizeMB}MB) | Hash: ${shortHash}...`
 			);
 
+			// Check for existing file
 			const existingKey = await this.checkIfFileExists(hash);
-
 			if (existingKey) {
 				return {
 					success: true,
-					file: {
-						key: existingKey,
-						name: file.name,
-						size: file.size,
-						contentType: file.type,
-						hash,
-						uploadedAt: file.lastModified
-							? new Date(file.lastModified).toISOString()
-							: new Date().toISOString(),
-					},
+					file: this.createUploadedFile(file, existingKey, hash),
 				};
 			}
 
-			const extension = getFileExtension(file.type);
-			const timestamp = Date.now();
-			const r2Key = `file/${hash}_${timestamp}${extension}`;
+			// Upload new file
+			const r2Key = await this.uploadToR2(buffer, file, hash);
+			console.log(`⚡ Upload completed for file: ${file.name}`);
 
-			await this.r2.put(r2Key, buffer, {
-				httpMetadata: {
-					contentType: file.type,
-				},
-				customMetadata: {
-					originalName: file.name,
-					hash,
-					uploadedAt: new Date().toISOString(),
-				},
-			});
-
-			await this.kv.put(`file:${hash}`, r2Key, {
-				expirationTtl: 86400 * 30,
-			});
-
-			const uploadedFile: UploadedFile = {
-				key: r2Key,
-				name: file.name,
-				size: file.size,
-				contentType: file.type,
-				hash,
-				uploadedAt: new Date().toISOString(),
+			return {
+				success: true,
+				file: this.createUploadedFile(file, r2Key, hash),
 			};
-
-			console.log(`⚡ Upload completed for file: ${file.name}	`);
-
-			return { success: true, file: uploadedFile };
 		} catch (error) {
 			console.error("Upload error:", error);
 			return {
@@ -127,27 +157,23 @@ export class UploadService {
 			files.map((file) => this.uploadFile(file))
 		);
 
-		results.forEach((result, index) => {
-			const file = files[index];
+		for (let i = 0; i < results.length; i++) {
+			const result = results[i];
+			const file = files[i];
 
-			if (result.status === "fulfilled") {
-				const uploadResult = result.value;
-
-				if (uploadResult.success && uploadResult.file) {
-					uploaded.push(uploadResult.file);
-				} else if (!uploadResult.success) {
-					errors.push({
-						name: file.name,
-						error: uploadResult.error || "Unknown error",
-					});
+			if (result.status === "fulfilled" && result.value.success) {
+				if (result.value.file) {
+					uploaded.push(result.value.file);
 				}
 			} else {
-				errors.push({
-					name: file.name,
-					error: result.reason?.message || "Upload failed",
-				});
+				const errorMessage =
+					result.status === "fulfilled"
+						? result.value.error || "Unknown error"
+						: result.reason?.message || "Upload failed";
+
+				errors.push({ name: file.name, error: errorMessage });
 			}
-		});
+		}
 
 		console.log(
 			`📊 Batch upload: ${uploaded.length} uploaded, ${errors.length} errors in total.`
